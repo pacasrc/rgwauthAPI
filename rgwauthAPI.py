@@ -11,7 +11,6 @@
 
 
 from swift.common import client as swiftClient
-import horizon 
 import cloudfiles
 import subprocess
 
@@ -108,7 +107,7 @@ class RadosGW(object):
         # rgw now still have to delete objects/buckets manually
         storage_url, auth_token = self.authenticate(autoCreate=True)
         swift_api = cloudfiles.get_connection(
-            auth=horizon.api.swift.SwiftAuthentication(storage_url, auth_token) )
+            auth=(storage_url, '', auth_token) )
         containers = swift_api.get_all_containers()
 
         for name in containers._names:
