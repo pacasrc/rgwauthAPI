@@ -11,6 +11,7 @@
 
 
 from swift.common import client as swiftClient
+import horizon 
 import cloudfiles
 import subprocess
 
@@ -39,6 +40,19 @@ class RadosGW(object):
         user = self._rgwadmin('user info --uid="%s"' % self.uid)
         return eval(user)
 
+    def _subuserInfo(self):
+        user = self._rgwadmin('user info --uid="%s" --subuser="%s:%s"'
+                % (self.uid, self.uid, self.subuser))
+        return eval(user)
+
+    def _userUsage(self):
+        usage = self._rgwadmin('usage show --uid="%s"' % self.uid)
+        return eval(usage)
+
+    def _bucketStats(self, bucket):
+        stats = self._rgwadmin('bucket stats --bucket="%s"' % bucket)
+        return eval(stats)
+
     def _authSwift(self):
         # radosgw only support auth version 1.0
         return swiftClient.get_auth(self.authUrl, "%s:%s" % (self.uid, self.subuser)
@@ -48,17 +62,20 @@ class RadosGW(object):
         """ Not implement yet """
         return
 
-    def _userCreate(self, keyType='swift'):
+    def _userCreate(self):
         user = self._rgwadmin('user create --uid="%s" --display-name="%s" --email="web@site"'
                 % (self.uid, self.uid))
         return eval(user)
 
-    def _subuserCreate(self, access='full'):
-        # subuser is only for swift api 
-        self._rgwadmin('subuser create --subuser="%s:%s"'
-                % (self.uid, self.subuser))
-        subuser = self._rgwadmin('key create --subuser="%s:%s" --key-type="swift" --access="%s"'
-                % (self.uid, self.subuser, access))
+    def _subuserCreate(self, keyType='swift', access='full'):
+        try:
+            subuser = self._subuserInfo()
+            return subuser
+        except:
+            subuser = self._rgwadmin('subuser create --subuser="%s:%s"'
+                    % (self.uid, self.subuser))
+            subuser = self._rgwadmin('key create --subuser="%s:%s" --key-type="%s" --access="%s"'
+                    % (self.uid, self.subuser, keyType, access))
         return eval(subuser)
 
     def authenticate(self, keyType='swift', autoCreate=False):
@@ -70,7 +87,7 @@ class RadosGW(object):
                 raise Exception('User: %s not found.' % (self.uid))
             else:
                 try:
-                    info = self._userCreate(keyType) 
+                    info = self._userCreate() 
                 except:
                     raise Exception('User create failed.')
 
@@ -90,15 +107,13 @@ class RadosGW(object):
             raise Exception('Subuser: %s:%s not found.' % (self.uid, self.subuser))
         else:
             try:
-                self._subuserCreate()
+                self._subuserCreate(keyType=keyType)
                 return self.authenticate(keyType)
             except:
-                raise Exception('Subuser create failed.')
+                raise Exception('Subuser create failed, please try again!')
 
     def rmSubuser(self):
-        self._rgwadmin('key rm --uid="%s" --subuser="%s:%s" --key-type="swift"'
-                % (self.uid, self.uid, self.subuser))
-        self._rgwadmin('subuser rm --uid="%s" --subuser="%s:%s"'
+        self._rgwadmin('subuser rm --uid="%s" --subuser="%s:%s" --purge-keys'
                 % (self.uid, self.uid, self.subuser))
 
     def rmUser(self):
@@ -107,7 +122,7 @@ class RadosGW(object):
         # rgw now still have to delete objects/buckets manually
         storage_url, auth_token = self.authenticate(autoCreate=True)
         swift_api = cloudfiles.get_connection(
-            auth=(storage_url, '', auth_token) )
+            auth=horizon.api.swift.SwiftAuthentication(storage_url, auth_token) )
         containers = swift_api.get_all_containers()
 
         for name in containers._names:
@@ -117,5 +132,5 @@ class RadosGW(object):
                 container.delete_object(obj_name)
             swift_api.delete_container(name)
 
-        self._rgwadmin('user rm --uid="%s"'
+        self._rgwadmin('user rm --uid="%s" --purge-data'
                 % (self.uid))
